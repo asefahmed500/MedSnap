@@ -1,23 +1,56 @@
-
 import React, { useState } from 'react';
 import { HighlightRegion } from '../types';
-import { Info, HelpCircle } from 'lucide-react';
+import { Info, HelpCircle, Volume2, Loader2 } from 'lucide-react';
+import { generateAudioFromScript } from '../services/geminiService';
 
 interface ImageViewerProps {
   imageSrc: string;
   highlights: HighlightRegion[];
   showHighlights?: boolean;
+  imageClassName?: string; // New prop to control image styling overrides
 }
 
-const ImageViewer: React.FC<ImageViewerProps> = ({ imageSrc, highlights, showHighlights = true }) => {
+const ImageViewer: React.FC<ImageViewerProps> = ({ 
+  imageSrc, 
+  highlights, 
+  showHighlights = true,
+  imageClassName 
+}) => {
   const [activeHighlight, setActiveHighlight] = useState<number | null>(null);
+  const [playingIndex, setPlayingIndex] = useState<number | null>(null);
+
+  const handlePlayAudio = async (text: string, index: number, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent opening the info popup when clicking speaker
+    
+    if (playingIndex === index) return; // Already playing/loading
+    
+    setPlayingIndex(index);
+    
+    try {
+      const audioData = await generateAudioFromScript(text);
+      if (audioData) {
+        const audio = new Audio(`data:audio/mp3;base64,${audioData}`);
+        audio.onended = () => setPlayingIndex(null);
+        audio.onpause = () => setPlayingIndex(null);
+        await audio.play();
+      } else {
+        // Fallback to browser TTS if Gemini fails
+        const u = new SpeechSynthesisUtterance(text);
+        u.onend = () => setPlayingIndex(null);
+        window.speechSynthesis.speak(u);
+      }
+    } catch (error) {
+      console.error("Failed to play highlight audio", error);
+      setPlayingIndex(null);
+    }
+  };
 
   return (
-    <div className="relative rounded-xl overflow-hidden shadow-md bg-slate-900 group">
+    <div className="relative rounded-xl overflow-hidden shadow-md bg-slate-900 group w-full">
       <img 
         src={imageSrc} 
         alt="Original Document" 
-        className="w-full h-auto object-contain max-h-[500px]"
+        className={imageClassName || "w-full h-auto object-contain max-h-[500px]"}
       />
       
       {/* Overlays */}
@@ -60,6 +93,8 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ imageSrc, highlights, showHig
                 break;
         }
 
+        const isPlaying = playingIndex === index;
+
         return (
           <div
             key={index}
@@ -75,16 +110,31 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ imageSrc, highlights, showHig
               setActiveHighlight(activeHighlight === index ? null : index);
             }}
           >
-            {/* Tappable 'i' Icon in Corner */}
-            <div className={`absolute -top-3 -right-3 bg-white rounded-full p-0.5 shadow-sm z-30 transform hover:scale-110 transition-transform ${activeHighlight === index ? 'scale-110' : ''}`}>
-               <div className={`bg-white rounded-full border ${borderColor} p-0.5`}>
+            {/* Icon Group (Speaker + Info) */}
+            <div className={`absolute -top-3 -right-8 flex gap-1 z-30 transition-transform ${activeHighlight === index ? 'scale-110' : ''}`}>
+               
+               {/* Speaker Icon */}
+               <button 
+                 onClick={(e) => handlePlayAudio(h.label, index, e)}
+                 className={`bg-white rounded-full border ${borderColor} p-0.5 shadow-sm hover:scale-110 active:scale-95 transition-transform flex items-center justify-center w-5 h-5`}
+                 title="Pronounce"
+               >
+                  {isPlaying ? (
+                    <Loader2 size={12} className={`${iconColor} animate-spin`} />
+                  ) : (
+                    <Volume2 size={12} className={iconColor} strokeWidth={2.5} />
+                  )}
+               </button>
+
+               {/* Info Icon */}
+               <div className={`bg-white rounded-full border ${borderColor} p-0.5 shadow-sm w-5 h-5 flex items-center justify-center`}>
                   <Info size={12} className={iconColor} strokeWidth={2.5} />
                </div>
             </div>
 
             {/* Explanation Popup */}
             {activeHighlight === index && (
-               <div className={`absolute -top-16 left-1/2 -translate-x-1/2 ${labelColor} text-white px-3 py-2 rounded-xl shadow-xl z-50 pointer-events-none min-w-[180px] max-w-[250px] animate-in zoom-in-95 duration-200`}>
+               <div className={`absolute -top-20 left-1/2 -translate-x-1/2 ${labelColor} text-white px-3 py-2 rounded-xl shadow-xl z-50 pointer-events-none min-w-[180px] max-w-[250px] animate-in zoom-in-95 duration-200`}>
                  <p className="text-xs font-bold uppercase tracking-wider mb-1 opacity-90 border-b border-white/20 pb-1">{h.label}</p>
                  <p className="text-xs font-medium leading-tight">
                     {h.importanceExplanation || "Important information regarding your health."}
@@ -97,9 +147,9 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ imageSrc, highlights, showHig
         );
       })}
 
-      <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full backdrop-blur-sm flex items-center gap-1 z-10">
+      <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full backdrop-blur-sm flex items-center gap-1 z-10 pointer-events-none">
         <HelpCircle size={12} />
-        <span>Tap <Info size={10} className="inline mx-0.5" /> icons for info</span>
+        <span>Tap <Volume2 size={10} className="inline mx-0.5" /> to listen, <Info size={10} className="inline mx-0.5" /> for info</span>
       </div>
     </div>
   );
