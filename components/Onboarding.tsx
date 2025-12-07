@@ -1,5 +1,6 @@
+
 import React, { useState, useRef } from 'react';
-import { ArrowRight, Check, Mic, Loader2, StopCircle } from 'lucide-react';
+import { ArrowRight, Check, Mic, Loader2, StopCircle, HeartHandshake, Languages, FileText } from 'lucide-react';
 import { SUPPORTED_LANGUAGES } from '../constants';
 import { Language } from '../types';
 import { identifyLanguageFromAudio } from '../services/geminiService';
@@ -83,17 +84,28 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
   if (step === 1) {
     return (
       <div className="h-full flex flex-col bg-white">
-        {/* Full bleed photo simulation */}
-        <div className="flex-1 relative overflow-hidden bg-slate-200">
-          <img 
-            src="https://images.unsplash.com/photo-1581056771107-24ca5f033842?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80" 
-            alt="Smiling grandmother with doctor" 
-            className="w-full h-full object-cover"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-white via-white/20 to-transparent"></div>
+        {/* Hero Section - Replaced Image with Icon Illustration */}
+        <div className="flex-1 relative overflow-hidden bg-gradient-to-br from-[#E3F2FD] to-[#F3E5F5] flex items-center justify-center">
+          {/* Abstract Shapes */}
+          <div className="absolute top-[-20%] right-[-20%] w-[80%] h-[80%] bg-blue-200/30 rounded-full blur-3xl"></div>
+          <div className="absolute bottom-[-10%] left-[-10%] w-[60%] h-[60%] bg-purple-200/30 rounded-full blur-3xl"></div>
+          
+          <div className="relative z-10 animate-in fade-in zoom-in duration-700">
+             <div className="bg-white p-8 rounded-[3rem] shadow-2xl shadow-blue-200/50 relative">
+                <HeartHandshake size={100} className="text-[#0066F5]" strokeWidth={1.5} />
+                
+                {/* Floating Badges */}
+                <div className="absolute -right-6 top-0 bg-white p-3 rounded-2xl shadow-lg animate-bounce-slow">
+                   <Languages className="text-orange-500" size={28} />
+                </div>
+                <div className="absolute -left-6 bottom-4 bg-white p-3 rounded-2xl shadow-lg animate-bounce-slow" style={{ animationDelay: '1.5s' }}>
+                   <FileText className="text-green-500" size={28} />
+                </div>
+             </div>
+          </div>
         </div>
 
-        <div className="px-8 pb-12 pt-6 bg-white rounded-t-3xl -mt-6 relative z-10 text-center">
+        <div className="px-8 pb-12 pt-8 bg-white rounded-t-[2.5rem] -mt-10 relative z-20 text-center shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
           <h1 className="text-3xl font-bold text-slate-900 leading-tight mb-4">
             Never be confused by medical papers again
           </h1>

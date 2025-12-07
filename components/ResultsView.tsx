@@ -2,10 +2,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { AnalysisResult } from '../types';
-import { Play, Pause, AlertTriangle, CheckCircle, Save, X, FastForward, Rewind, MoreHorizontal } from 'lucide-react';
+import { Play, Pause, AlertTriangle, CheckCircle, FileDown, X, FastForward, Rewind, Share2, Loader2 } from 'lucide-react';
 import ImageViewer from './ImageViewer';
 import QuizModal from './QuizModal';
-import { generatePDF } from '../services/pdfService';
+import { generatePDF, generatePDFBlob } from '../services/pdfService';
 import { generateAudioFromScript } from '../services/geminiService';
 
 interface ResultsViewProps {
@@ -17,53 +17,136 @@ interface ResultsViewProps {
 const ResultsView: React.FC<ResultsViewProps> = ({ result, imageSrc, onRetake }) => {
   const [showAudioSheet, setShowAudioSheet] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
   const [showQuiz, setShowQuiz] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Colors based on requirement: #0066F5 (Blue), #D32F2F (Red), etc.
+  // Clean up audio on unmount
+  useEffect(() => {
+    return () => {
+        if (audioRef.current) {
+            audioRef.current.pause();
+        }
+        window.speechSynthesis.cancel();
+    };
+  }, []);
   
+  const fallbackToSynthesis = () => {
+      console.log("Falling back to SpeechSynthesis");
+      const u = new SpeechSynthesisUtterance(result.summary);
+      u.onend = () => setIsPlaying(false);
+      window.speechSynthesis.speak(u);
+      setIsPlaying(true);
+      setIsLoadingAudio(false);
+  };
+
   const toggleAudio = async () => {
     if (!showAudioSheet) setShowAudioSheet(true);
     
-    if (isPlaying && audioRef.current) {
-        audioRef.current.pause();
+    // Pause if playing
+    if (isPlaying) {
+        if (audioRef.current && !audioRef.current.paused) {
+            audioRef.current.pause();
+        }
+        if (window.speechSynthesis.speaking) {
+            window.speechSynthesis.cancel();
+        }
         setIsPlaying(false);
         return;
     }
     
-    // Simulate playing for UI or fetch real audio
-    setIsPlaying(true);
-    
-    if (!audioRef.current) {
-        try {
-            // Attempt to fetch audio if we don't have it
-            // Note: generateAudioFromScript in geminiService might return null if failed
-            const audioData = await generateAudioFromScript(result.summary);
-            if (audioData) {
-                 // The service returns base64 bytes for audio, we need to prefix it for source
-                 // check if service adds prefix or not. service adds prefix? 
-                 // Let's check service. Service code: return base64Audio.
-                 // So we need to add 'data:audio/wav;base64,' if not present.
-                 // Actually the service currently returns just raw base64 data from inlineData.
-                 const src = `data:audio/mp3;base64,${audioData}`;
-                 const audio = new Audio(src);
-                 audio.onended = () => setIsPlaying(false);
-                 audioRef.current = audio;
+    // Resume existing HTML Audio
+    if (audioRef.current) {
+        audioRef.current.play()
+            .then(() => setIsPlaying(true))
+            .catch(() => fallbackToSynthesis()); // Fallback if playback fails
+        return;
+    }
+
+    // New Playback Request
+    setIsLoadingAudio(true);
+    try {
+        const audioData = await generateAudioFromScript(result.summary);
+        
+        if (audioData) {
+             // Try to play with HTML5 Audio
+             const src = `data:audio/wav;base64,${audioData}`;
+             const audio = new Audio(src);
+             
+             audio.oncanplaythrough = () => {
                  audio.play();
-            } else {
-                 // Fallback to synthesis
-                 const u = new SpeechSynthesisUtterance(result.summary);
-                 u.onend = () => setIsPlaying(false);
-                 window.speechSynthesis.speak(u);
-            }
-        } catch (e) {
-            console.error("Audio error", e);
-             const u = new SpeechSynthesisUtterance(result.summary);
-             u.onend = () => setIsPlaying(false);
-             window.speechSynthesis.speak(u);
+                 setIsPlaying(true);
+                 setIsLoadingAudio(false);
+                 audioRef.current = audio;
+             };
+             
+             audio.onended = () => setIsPlaying(false);
+             
+             audio.onerror = (e) => {
+                 console.warn("HTML5 Audio playback failed (format likely unsupported), using fallback.", e);
+                 fallbackToSynthesis();
+             };
+
+             // Load the src to trigger events
+             audio.load();
+        } else {
+             fallbackToSynthesis();
         }
-    } else {
-        audioRef.current.play();
+    } catch (e) {
+        console.error("Audio generation error", e);
+        fallbackToSynthesis();
+    }
+  };
+
+  const handleShare = async () => {
+    if (!navigator.share) {
+      alert("Sharing is not supported on this device/browser.");
+      return;
+    }
+
+    try {
+      // Strategy 1: Try sharing PDF (The "Translated Document")
+      const pdfBlob = generatePDFBlob(result, imageSrc);
+      const pdfFile = new File([pdfBlob], `MedSnap_${result.title.replace(/\s+/g, '_')}.pdf`, { type: 'application/pdf' });
+
+      const pdfShareData = {
+        title: `MedSnap: ${result.title}`,
+        text: `Translation for: ${result.title}\n\n${result.summary}\n\n-- Translated via MedSnap`,
+        files: [pdfFile],
+      };
+
+      if (navigator.canShare && navigator.canShare(pdfShareData)) {
+        await navigator.share(pdfShareData);
+        return;
+      }
+      
+      // Strategy 2: Fallback to Image + Text
+      console.log("PDF sharing not supported, trying image...");
+      const imgRes = await fetch(imageSrc);
+      const imgBlob = await imgRes.blob();
+      const imgFile = new File([imgBlob], "original_doc.jpg", { type: imgBlob.type });
+      
+      const imgShareData = {
+          title: `MedSnap: ${result.title}`,
+          text: `Translation for: ${result.title}\n\n${result.summary}\n\n-- Translated via MedSnap`,
+          files: [imgFile]
+      };
+      
+      if (navigator.canShare && navigator.canShare(imgShareData)) {
+          await navigator.share(imgShareData);
+          return;
+      }
+
+      // Strategy 3: Text Only Fallback
+      console.log("File sharing not supported, sharing text only...");
+      await navigator.share({
+         title: `MedSnap: ${result.title}`,
+         text: `Translation for: ${result.title}\n\n${result.summary}\n\n-- Translated via MedSnap`,
+         url: window.location.href 
+      });
+
+    } catch (error) {
+      console.error("Error sharing:", error);
     }
   };
 
@@ -130,30 +213,39 @@ const ResultsView: React.FC<ResultsViewProps> = ({ result, imageSrc, onRetake })
            </div>
 
            {/* Bottom Fixed Action Bar (Frosted) */}
-           <div className="absolute bottom-0 left-0 right-0 p-6 bg-white/80 backdrop-blur-xl border-t border-slate-100 flex items-center gap-4 z-20">
+           <div className="absolute bottom-0 left-0 right-0 p-4 pb-8 bg-white/80 backdrop-blur-xl border-t border-slate-100 flex items-center gap-3 z-20">
               
               <button 
                 onClick={toggleAudio}
-                className="flex-1 bg-[#0066F5] text-white h-14 rounded-2xl font-bold text-lg shadow-lg shadow-blue-200 flex items-center justify-center gap-2 hover:bg-blue-600 transition-colors"
+                disabled={isLoadingAudio}
+                className="flex-[2] bg-[#0066F5] text-white h-14 rounded-2xl font-bold text-lg shadow-lg shadow-blue-200 flex items-center justify-center gap-2 hover:bg-blue-600 transition-colors disabled:opacity-70"
               >
-                <Play fill="currentColor" size={20} />
-                Listen
+                {isLoadingAudio ? <Loader2 className="animate-spin" /> : <Play fill="currentColor" size={20} />}
+                {isLoadingAudio ? "Loading..." : "Listen"}
               </button>
 
               <button 
                  onClick={() => setShowQuiz(true)}
-                 className="h-14 w-14 bg-green-50 text-[#388E3C] rounded-2xl border border-green-100 flex items-center justify-center hover:bg-green-100 transition-colors"
+                 className="h-14 w-14 bg-green-50 text-[#388E3C] rounded-2xl border border-green-100 flex items-center justify-center hover:bg-green-100 transition-colors shrink-0"
                  title="Verify Understanding"
               >
                  <CheckCircle size={28} />
               </button>
 
               <button 
-                 onClick={() => generatePDF(result, imageSrc)}
-                 className="h-14 w-14 bg-slate-50 text-slate-600 rounded-2xl border border-slate-100 flex items-center justify-center hover:bg-slate-100 transition-colors"
-                 title="Save as PDF"
+                 onClick={handleShare}
+                 className="h-14 w-14 bg-slate-50 text-slate-600 rounded-2xl border border-slate-100 flex items-center justify-center hover:bg-slate-100 transition-colors shrink-0"
+                 title="Share PDF or Image"
               >
-                 <Save size={24} />
+                 <Share2 size={24} />
+              </button>
+
+              <button 
+                 onClick={() => generatePDF(result, imageSrc)}
+                 className="h-14 w-14 bg-slate-50 text-slate-600 rounded-2xl border border-slate-100 flex items-center justify-center hover:bg-slate-100 transition-colors shrink-0"
+                 title="Download PDF"
+              >
+                 <FileDown size={24} />
               </button>
            </div>
         </div>

@@ -2,7 +2,8 @@
 import { jsPDF } from "jspdf";
 import { AnalysisResult } from "../types";
 
-export const generatePDF = (result: AnalysisResult, imageSrc: string) => {
+// Helper to construct the PDF content
+const createDoc = (result: AnalysisResult, imageSrc: string) => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -192,5 +193,15 @@ export const generatePDF = (result: AnalysisResult, imageSrc: string) => {
     });
   }
 
+  return doc;
+};
+
+export const generatePDF = (result: AnalysisResult, imageSrc: string) => {
+  const doc = createDoc(result, imageSrc);
   doc.save(`MedSnap_Translation_${Date.now()}.pdf`);
+};
+
+export const generatePDFBlob = (result: AnalysisResult, imageSrc: string): Blob => {
+  const doc = createDoc(result, imageSrc);
+  return doc.output('blob');
 };

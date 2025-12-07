@@ -1,6 +1,8 @@
+
 import { LanguageCode } from '../types';
 
 const STORAGE_KEY = 'medsnap_offline_models';
+const MOCK_MODEL_SIZE_MB = 245; // Simulated size per language pack
 
 export const getDownloadedModels = (): LanguageCode[] => {
   try {
@@ -15,6 +17,17 @@ export const getDownloadedModels = (): LanguageCode[] => {
 export const isModelDownloaded = (code: LanguageCode): boolean => {
   const downloaded = getDownloadedModels();
   return downloaded.includes(code);
+};
+
+export const getModelSize = (code: LanguageCode): number => {
+  // In a real app, different languages might have different sizes
+  // Here we simulate slightly different sizes based on code length for variety
+  return MOCK_MODEL_SIZE_MB + (code.length * 2); 
+};
+
+export const getTotalStorageUsed = (): number => {
+  const downloaded = getDownloadedModels();
+  return downloaded.reduce((acc, code) => acc + getModelSize(code), 0);
 };
 
 export const downloadModel = async (

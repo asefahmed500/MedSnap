@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
-import { X, Download, Trash2, Wifi, WifiOff, CheckCircle2, Loader2 } from 'lucide-react';
+import { X, Download, Trash2, Wifi, WifiOff, CheckCircle2, Loader2, HardDrive, Smartphone } from 'lucide-react';
 import { SUPPORTED_LANGUAGES } from '../constants';
 import { LanguageCode } from '../types';
-import { getDownloadedModels, downloadModel, deleteModel } from '../services/offlineService';
+import { getDownloadedModels, downloadModel, deleteModel, getTotalStorageUsed, getModelSize } from '../services/offlineService';
 
 interface OfflineManagerProps {
   isOpen: boolean;
@@ -13,10 +14,16 @@ const OfflineManager: React.FC<OfflineManagerProps> = ({ isOpen, onClose }) => {
   const [downloaded, setDownloaded] = useState<LanguageCode[]>([]);
   const [downloading, setDownloading] = useState<LanguageCode | null>(null);
   const [progress, setProgress] = useState(0);
+  const [totalStorage, setTotalStorage] = useState(0);
+
+  const refreshData = () => {
+    setDownloaded(getDownloadedModels());
+    setTotalStorage(getTotalStorageUsed());
+  };
 
   useEffect(() => {
     if (isOpen) {
-      setDownloaded(getDownloadedModels());
+      refreshData();
     }
   }, [isOpen]);
 
@@ -26,7 +33,7 @@ const OfflineManager: React.FC<OfflineManagerProps> = ({ isOpen, onClose }) => {
     setProgress(0);
     try {
       await downloadModel(code, (p) => setProgress(p));
-      setDownloaded(getDownloadedModels());
+      refreshData();
     } catch (error) {
       console.error("Download failed", error);
     } finally {
@@ -36,76 +43,114 @@ const OfflineManager: React.FC<OfflineManagerProps> = ({ isOpen, onClose }) => {
 
   const handleDelete = (code: LanguageCode) => {
     deleteModel(code);
-    setDownloaded(getDownloadedModels());
+    refreshData();
   };
 
   if (!isOpen) return null;
 
+  // Format MB/GB
+  const formatSize = (mb: number) => {
+    if (mb > 1000) return `${(mb / 1024).toFixed(1)} GB`;
+    return `${mb} MB`;
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col max-h-[85vh] animate-in zoom-in-95">
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden animate-in zoom-in-95 duration-300">
         
-        <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+        {/* Header */}
+        <div className="p-6 pb-4 border-b border-slate-100 flex items-center justify-between bg-white z-10">
           <div>
             <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-              <WifiOff className="text-blue-600" />
-              Offline Mode
+              <WifiOff className="text-[#0066F5]" size={24} />
+              Offline Models
             </h2>
-            <p className="text-sm text-slate-500 mt-1">Download language packs to use MedSnap without internet.</p>
+            <p className="text-sm text-slate-500 mt-1">Manage language packs for offline use.</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1">
-            <X size={24} />
+          <button 
+            onClick={onClose} 
+            className="w-8 h-8 flex items-center justify-center bg-slate-100 rounded-full text-slate-500 hover:bg-slate-200 transition-colors"
+          >
+            <X size={20} />
           </button>
         </div>
 
-        <div className="overflow-y-auto p-4 space-y-2 flex-1 custom-scrollbar">
+        {/* Storage Dashboard */}
+        <div className="px-6 py-6 bg-slate-50 border-b border-slate-100">
+            <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                    <HardDrive size={14} /> Storage Used
+                </span>
+                <span className="text-lg font-bold text-slate-900">{formatSize(totalStorage)}</span>
+            </div>
+            
+            {/* Progress Bar */}
+            <div className="h-3 w-full bg-slate-200 rounded-full overflow-hidden flex">
+                <div 
+                    className="h-full bg-[#0066F5] transition-all duration-500" 
+                    style={{ width: `${Math.min((totalStorage / 2000) * 100, 100)}%` }} // Assume 2GB soft limit for visual
+                />
+            </div>
+            <p className="text-xs text-slate-400 mt-2 text-right">
+                {formatSize(2000 - totalStorage)} available (simulated)
+            </p>
+        </div>
+
+        {/* List */}
+        <div className="overflow-y-auto p-4 space-y-3 flex-1 custom-scrollbar bg-white">
           {SUPPORTED_LANGUAGES.map((lang) => {
             const isDownloaded = downloaded.includes(lang.code);
             const isDownloading = downloading === lang.code;
+            const size = getModelSize(lang.code);
 
             return (
-              <div key={lang.code} className="flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:border-blue-100 hover:bg-slate-50 transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isDownloaded ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500'}`}>
-                    <span className="font-bold text-sm">{lang.code.toUpperCase()}</span>
+              <div 
+                key={lang.code} 
+                className={`flex items-center justify-between p-4 rounded-2xl border transition-all duration-200 ${isDownloaded ? 'bg-slate-50 border-slate-200' : 'bg-white border-slate-100 hover:border-blue-200'}`}
+              >
+                <div className="flex items-center gap-4">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-bold shadow-sm ${isDownloaded ? 'bg-white text-[#0066F5]' : 'bg-slate-100 text-slate-400'}`}>
+                    {lang.code.toUpperCase()}
                   </div>
                   <div>
-                    <h4 className="font-medium text-slate-900">{lang.name}</h4>
-                    <p className="text-xs text-slate-500">{lang.nativeName}</p>
+                    <h4 className={`font-bold ${isDownloaded ? 'text-slate-900' : 'text-slate-600'}`}>{lang.name}</h4>
+                    <p className="text-xs text-slate-400 flex items-center gap-1">
+                        {lang.nativeName} • {formatSize(size)}
+                    </p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2">
                   {isDownloading ? (
                     <div className="flex flex-col items-end gap-1 min-w-[80px]">
-                      <div className="flex items-center gap-2 text-xs text-blue-600 font-medium">
+                      <div className="flex items-center gap-2 text-xs text-blue-600 font-bold">
                         <Loader2 size={12} className="animate-spin" />
                         {progress}%
                       </div>
                       <div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${progress}%` }} />
+                        <div className="h-full bg-[#0066F5] transition-all duration-300" style={{ width: `${progress}%` }} />
                       </div>
                     </div>
                   ) : isDownloaded ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-green-600 font-medium bg-green-50 px-2 py-1 rounded-full flex items-center gap-1">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-green-600 font-bold bg-green-50 px-2 py-1 rounded-lg flex items-center gap-1">
                         <CheckCircle2 size={12} /> Ready
                       </span>
                       <button 
                         onClick={() => handleDelete(lang.code)}
-                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Remove download"
+                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors"
+                        title="Delete Model"
                       >
-                        <Trash2 size={18} />
+                        <Trash2 size={20} />
                       </button>
                     </div>
                   ) : (
                     <button 
                       onClick={() => handleDownload(lang.code)}
-                      className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
-                      title="Download"
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-[#0066F5] font-bold text-sm rounded-xl hover:bg-blue-100 transition-colors"
                     >
-                      <Download size={18} />
+                      <Download size={16} />
+                      Get
                     </button>
                   )}
                 </div>
@@ -114,10 +159,11 @@ const OfflineManager: React.FC<OfflineManagerProps> = ({ isOpen, onClose }) => {
           })}
         </div>
 
-        <div className="p-4 bg-slate-50 border-t border-slate-100 rounded-b-2xl text-xs text-slate-500 flex items-start gap-2">
-          <Wifi size={14} className="mt-0.5 shrink-0" />
-          <p>
-            Note: Offline translations use on-device models and may be less accurate than online analysis. Always verify critical information.
+        {/* Footer */}
+        <div className="p-4 bg-slate-50 border-t border-slate-100 text-xs text-slate-500 flex items-start gap-3">
+          <Smartphone size={16} className="mt-0.5 shrink-0 text-slate-400" />
+          <p className="leading-relaxed">
+            Offline models allow basic translation without internet. For full medical accuracy and safety checks, an internet connection is recommended.
           </p>
         </div>
 
