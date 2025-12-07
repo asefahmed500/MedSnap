@@ -1,0 +1,8 @@
+{
+  "name": "MedSnap",
+  "description": "AI-powered medical document translator helping families understand healthcare information through vision, translation, and audio explanation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
