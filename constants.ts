@@ -11,6 +11,16 @@ export const SUPPORTED_LANGUAGES: Language[] = [
   { code: 'ru', name: 'Russian', nativeName: 'Русский' },
   { code: 'ht', name: 'Haitian Creole', nativeName: 'Kreyòl Ayisyen' },
   { code: 'pt', name: 'Portuguese', nativeName: 'Português' },
+  { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी' },
+  { code: 'ur', name: 'Urdu', nativeName: 'اردو' },
+  { code: 'bn', name: 'Bengali', nativeName: 'বাংলা' },
+  { code: 'fa', name: 'Farsi', nativeName: 'فارسی' },
+  { code: 'so', name: 'Somali', nativeName: 'Soomaali' },
+  { code: 'ne', name: 'Nepali', nativeName: 'नेपाली' },
+  { code: 'uk', name: 'Ukrainian', nativeName: 'Українська' },
+  { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili' },
+  { code: 'am', name: 'Amharic', nativeName: 'አማርኛ' },
+  { code: 'my', name: 'Burmese', nativeName: 'မြန်မာစာ' },
 ];
 
 export const INITIAL_LANGUAGE = SUPPORTED_LANGUAGES[0];

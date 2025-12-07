@@ -1,23 +1,40 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Header from './components/Header';
 import CameraCapture from './components/CameraCapture';
 import Processing from './components/Processing';
 import ResultsView from './components/ResultsView';
-import { AppState, Language } from './types';
-import { INITIAL_LANGUAGE } from './constants';
+import HistoryView from './components/HistoryView';
+import OfflineManager from './components/OfflineManager';
+import Onboarding from './components/Onboarding';
+import Home from './components/Home';
+import { AppState, HistoryItem, Language } from './types';
 import { analyzeDocument } from './services/geminiService';
+import { saveToHistory, getHistory } from './services/storageService';
 
 const App: React.FC = () => {
+  const [hasOnboarded, setHasOnboarded] = useState(false);
   const [state, setState] = useState<AppState>({
+    view: 'home',
     step: 'capture',
     image: null,
-    selectedLanguage: INITIAL_LANGUAGE,
+    selectedLanguage: { code: 'es', name: 'Spanish', nativeName: 'Español' }, // Default placeholder
     result: null,
     error: null,
+    showOfflineManager: false,
   });
 
+  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
+
+  useEffect(() => {
+    setHistoryItems(getHistory());
+  }, []);
+
+  const handleOnboardingComplete = (lang: Language) => {
+      setState(prev => ({ ...prev, selectedLanguage: lang }));
+      setHasOnboarded(true);
+  };
+
   const handleCapture = async (file: File) => {
-    // Convert to Base64
     const reader = new FileReader();
     reader.onloadend = async () => {
       const base64 = reader.result as string;
@@ -26,11 +43,24 @@ const App: React.FC = () => {
         ...prev, 
         step: 'processing', 
         image: base64,
-        error: null 
+        error: null,
+        view: 'home'
       }));
 
       try {
         const result = await analyzeDocument(base64, state.selectedLanguage);
+        
+        const newItem: HistoryItem = {
+          id: Date.now().toString(),
+          timestamp: Date.now(),
+          image: base64,
+          result: result,
+          language: state.selectedLanguage
+        };
+        
+        saveToHistory(newItem);
+        setHistoryItems(getHistory());
+
         setState(prev => ({
           ...prev,
           step: 'results',
@@ -39,10 +69,10 @@ const App: React.FC = () => {
       } catch (error: any) {
         setState(prev => ({
           ...prev,
-          step: 'capture', // Go back to capture on error
-          error: error.message || "Something went wrong. Please try again."
+          step: 'capture',
+          error: error.message
         }));
-        alert("Failed to analyze document: " + (error.message || "Unknown error"));
+        alert("Error: " + error.message);
       }
     };
     reader.readAsDataURL(file);
@@ -56,36 +86,105 @@ const App: React.FC = () => {
       result: null,
       error: null
     }));
-    window.speechSynthesis.cancel();
   };
 
+  // Main Render Logic
+  
+  if (!hasOnboarded) {
+      return <Onboarding onComplete={handleOnboardingComplete} />;
+  }
+
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      <Header />
+    <div className="h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden flex flex-col">
       
-      <main className="flex-1 w-full">
-        {state.step === 'capture' && (
-          <CameraCapture 
-            onCapture={handleCapture}
-            selectedLanguage={state.selectedLanguage}
-            onLanguageChange={(lang) => setState(prev => ({ ...prev, selectedLanguage: lang }))}
+      {state.view !== 'history' && state.step !== 'results' && state.step !== 'capture' && (
+        <Header 
+          currentView={state.view}
+          onHomeClick={() => setState(prev => ({ ...prev, view: 'home', step: 'capture' }))}
+          onHistoryClick={() => setState(prev => ({ ...prev, view: 'history' }))}
+          onSettingsClick={() => setState(prev => ({ ...prev, showOfflineManager: true }))}
+        />
+      )}
+      
+      <main className="flex-1 w-full relative h-full">
+        {state.view === 'history' ? (
+          <HistoryView 
+            items={historyItems} 
+            onSelect={(item) => setState(prev => ({
+              ...prev,
+              view: 'home',
+              step: 'results',
+              image: item.image,
+              result: item.result,
+              selectedLanguage: item.language
+            }))}
+            onBack={() => setState(prev => ({ ...prev, view: 'home' }))}
           />
-        )}
+        ) : (
+          <>
+            {/* Logic for Home vs Capture vs Results */}
+            {state.step === 'capture' && (
+                // We split "Home" and "Camera" logic here roughly based on user intent
+                // For MVP state machine simplicity: 
+                // We show Home first. Home button triggers Camera Overlay.
+                // We will use a local state in App to toggle the Camera Overlay visibility if needed, 
+                // OR just treat 'capture' as the Home screen for now, but pass a prop to trigger camera.
+                // Let's make Home the default 'capture' step view, and it opens CameraCapture component on click.
+                <StatefulHome 
+                   userName="Maria" 
+                   language={state.selectedLanguage}
+                   onCapture={handleCapture}
+                />
+            )}
 
-        {state.step === 'processing' && (
-          <Processing />
-        )}
+            {state.step === 'processing' && (
+              <Processing />
+            )}
 
-        {state.step === 'results' && state.result && state.image && (
-          <ResultsView 
-            result={state.result}
-            imageSrc={state.image}
-            onRetake={handleRetake}
-          />
+            {state.step === 'results' && state.result && state.image && (
+              <ResultsView 
+                result={state.result}
+                imageSrc={state.image}
+                onRetake={handleRetake}
+              />
+            )}
+          </>
         )}
       </main>
+
+      <OfflineManager 
+        isOpen={state.showOfflineManager} 
+        onClose={() => setState(prev => ({ ...prev, showOfflineManager: false }))} 
+      />
     </div>
   );
 };
+
+// Internal wrapper to handle the Home -> Camera transition within the 'capture' step
+const StatefulHome: React.FC<{
+    userName: string;
+    language: Language;
+    onCapture: (f: File) => void;
+}> = ({ userName, language, onCapture }) => {
+    const [showCamera, setShowCamera] = useState(false);
+
+    if (showCamera) {
+        return (
+            <CameraCapture 
+                onCapture={onCapture}
+                onCancel={() => setShowCamera(false)}
+                selectedLanguage={language}
+            />
+        );
+    }
+
+    return (
+        <Home 
+            userName={userName}
+            language={language}
+            onStartCapture={() => setShowCamera(true)}
+        />
+    );
+}
 
 export default App;

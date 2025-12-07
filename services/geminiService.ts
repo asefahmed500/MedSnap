@@ -1,35 +1,106 @@
-import { GoogleGenAI, Type } from "@google/genai";
-import { AnalysisResult, Language } from "../types";
+
+import { GoogleGenAI, Type, Modality } from "@google/genai";
+import { AnalysisResult, Language, LanguageCode } from "../types";
+import { isModelDownloaded } from "./offlineService";
+import { SUPPORTED_LANGUAGES } from "../constants";
 
 // Initialize Gemini Client
-// IMPORTANT: In a real production app, this should be proxied through a backend
-// to avoid exposing the API key. For this demo architecture, we use client-side.
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+const MOCK_OFFLINE_RESULT: AnalysisResult = {
+  title: "Offline Analysis (Limited Mode)",
+  documentType: "unknown",
+  translatedContent: "### Offline Mode Active\n\n**Note:** You are currently offline. This is a basic analysis based on on-device capabilities.\n\nWe have detected a medical document. Please reconnect to the internet for a full analysis including safety checks, detailed translation, and visual highlighting.\n\n**Extracted Content:**\n\n*(Simulation)* Patient instructions and medication details would appear here extracted via local OCR.",
+  summary: "You are currently offline. This is a limited analysis. Please connect to the internet for full details.",
+  isEmergency: false,
+  highlights: [
+    {
+        box_2d: [100, 100, 300, 900],
+        label: "Document Content",
+        type: "normal",
+        description: "Text region detected"
+    }
+  ],
+  quiz: [
+    { 
+      question: "Is the app in offline mode?", 
+      answer: true, 
+      explanation: "Yes, the app is using the downloaded language model for basic processing." 
+    },
+    {
+      question: "Can I get full details offline?",
+      answer: false,
+      explanation: "No, full safety checks and precise translation require an internet connection."
+    }
+  ]
+};
 
 export const analyzeDocument = async (
   base64Image: string,
   targetLanguage: Language
 ): Promise<AnalysisResult> => {
+  // Check connectivity first
+  if (!navigator.onLine) {
+    if (isModelDownloaded(targetLanguage.code)) {
+      console.log("Offline mode: using downloaded model");
+      return {
+        ...MOCK_OFFLINE_RESULT,
+        timestamp: Date.now()
+      };
+    } else {
+      throw new Error(`You are offline. Please download the ${targetLanguage.name} model for offline use.`);
+    }
+  }
+
   try {
     // Strip the data:image/jpeg;base64, prefix if present
     const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
 
     const prompt = `
-      You are MedSnap, an expert medical translator and assistant. 
-      Analyze the provided medical document image.
+      You are a certified medical translator and pharmacist. 
+      Analyze the provided medical document image (prescription, lab result, discharge summary).
       
+      Source Language: English (assumed, unless clearly otherwise).
       Target Language: ${targetLanguage.name} (${targetLanguage.nativeName}).
 
+      Your goal is to provide a medically accurate translation that preserves all numbers, dates, and drug names exactly, while using a formal but simple tone suitable for low-literacy patients.
+
       Task:
-      1. Identify the document type (Prescription, Lab Result, Discharge Instructions, etc.).
-      2. Translate the core content into the Target Language. Use simple, clear language suitable for a layperson.
-      3. Identify any EMERGENCY instructions or critical warnings (e.g., "Call 911", "Severe side effects").
-      4. Create a specialized audio summary script that explains the document simply in the Target Language.
-      5. Identify specific regions in the image to highlight (Medication Names, Dosages, Warnings, Dates).
-      6. Create 3 simple Yes/No questions in the Target Language to verify the user understands the key instructions.
+      
+      1. **CRITICAL SAFETY CHECK (Emergency Detection)**: 
+         Scan the text for ANY life-threatening instructions or indicators.
+         Triggers include but are not limited to:
+         - "Call 911", "Go to ER", "Emergency Room", "Seek immediate care".
+         - Critical symptoms: "Chest pain", "Shortness of breath", "Difficulty breathing", "Anaphylaxis".
+         - Critical lab values explicitly flagged as "Critical", "Panic", or significantly out of safe range (e.g. Potassium > 6.0).
+         
+         If ANY of these are found:
+         - Set 'isEmergency' to TRUE.
+         - Set 'emergencyMessage' to a translated urgent warning banner (e.g., "¡EMERGENCIA! Vaya al hospital ahora mismo").
+
+      2. **Medical Translation**: 
+         Translate the full content into ${targetLanguage.name}.
+         - **Style**: Formal but simple tone suitable for low-literacy patients.
+         - **Accuracy**: Preserve all numbers, dates, and drug names EXACTLY. Do not translate the names of medications (e.g. "Amoxicillin" remains "Amoxicillin").
+         - **Structure**: Maintain original layout structure in Markdown as much as possible.
+
+      3. **Audio Script**: 
+         Create a natural spoken explanation in ${targetLanguage.name}.
+         - Structure: Short, clear sentences.
+         - Example style: "This is a prescription for [Drug]. You must take [Amount] [Frequency] with food..."
+
+      4. **Visual Highlights**: 
+         Identify regions to highlight on the image:
+         - **CRITICAL** (Red): The specific emergency warnings found in step 1, plus allergies/contraindications.
+         - **MEDICATION** (Orange): Drug names, dosages, frequencies.
+         - **DATE** (Yellow): Dates, times, durations.
+         - **NORMAL** (Green): Normal lab results, standard headers.
+
+      5. **Verification**: 
+         Create 3 simple Yes/No questions in ${targetLanguage.name} to verify the patient understands the key instructions.
 
       Return the response in strictly valid JSON format matching the schema provided.
-      For the highlights, estimate the bounding boxes [ymin, xmin, ymax, xmax] on a scale of 0 to 1000.
+      For highlights, provide bounding boxes [ymin, xmin, ymax, xmax] on a scale of 0 to 1000.
     `;
 
     const response = await ai.models.generateContent({
@@ -57,10 +128,10 @@ export const analyzeDocument = async (
               type: Type.STRING, 
               enum: ["prescription", "lab_result", "discharge", "instruction", "unknown"] 
             },
-            translatedContent: { type: Type.STRING, description: "Full translation in Markdown format" },
-            summary: { type: Type.STRING, description: "A conversational summary script for TTS" },
-            isEmergency: { type: Type.BOOLEAN },
-            emergencyMessage: { type: Type.STRING, description: "Translating warning message if emergency" },
+            translatedContent: { type: Type.STRING, description: "Full medically accurate translation in Markdown" },
+            summary: { type: Type.STRING, description: "Natural audio script in target language" },
+            isEmergency: { type: Type.BOOLEAN, description: "True if life-threatening instructions are found" },
+            emergencyMessage: { type: Type.STRING, description: "Translated urgent banner text (e.g. '¡EMERGENCIA! ...')" },
             highlights: {
               type: Type.ARRAY,
               items: {
@@ -97,10 +168,110 @@ export const analyzeDocument = async (
     const text = response.text;
     if (!text) throw new Error("No response from Gemini");
 
-    return JSON.parse(text) as AnalysisResult;
+    const result = JSON.parse(text) as AnalysisResult;
+    result.timestamp = Date.now();
+    return result;
+
+  } catch (error: any) {
+    console.error("Gemini Analysis Error:", error);
+    
+    // Fallback if offline-like error occurs
+    if (isModelDownloaded(targetLanguage.code) && 
+       (error.message?.includes('fetch') || error.message?.includes('network') || !navigator.onLine)) {
+        return {
+          ...MOCK_OFFLINE_RESULT,
+          timestamp: Date.now()
+        };
+    }
+
+    throw new Error("Failed to analyze document. Check your internet connection or try again.");
+  }
+};
+
+export const identifyLanguageFromAudio = async (base64Audio: string): Promise<Language | null> => {
+  try {
+    const cleanBase64 = base64Audio.replace(/^data:audio\/(webm|mp3|wav|ogg|mpeg);base64,/, "");
+    
+    // We assume the browser records in webm, but Gemini handles detection well.
+    // The mimeType passed to inlineData should match the data.
+    // If it's a raw blob from MediaRecorder in Chrome, it's usually audio/webm.
+    
+    const prompt = `
+      User just spoke their preferred language.
+      Detect the language they requested and return ONLY this JSON:
+      {"target_language_name": "Spanish", "target_language_code": "es"}
+      
+      The target_language_code must be one of: ${SUPPORTED_LANGUAGES.map(l => l.code).join(', ')}.
+      If the language is not found or unclear, return null.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType: "audio/webm", // Common browser recording format
+              data: cleanBase64,
+            },
+          },
+          {
+            text: prompt,
+          },
+        ],
+      },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+           type: Type.OBJECT,
+           properties: {
+             target_language_name: { type: Type.STRING },
+             target_language_code: { type: Type.STRING },
+           },
+           required: ["target_language_name", "target_language_code"]
+        }
+      }
+    });
+
+    const text = response.text;
+    if (!text) return null;
+
+    const result = JSON.parse(text);
+    if (!result.target_language_code) return null;
+
+    // Find the matching language object
+    const match = SUPPORTED_LANGUAGES.find(l => l.code === result.target_language_code);
+    return match || null;
 
   } catch (error) {
-    console.error("Gemini Analysis Error:", error);
-    throw new Error("Failed to analyze document. Please ensure the image is clear and try again.");
+    console.error("Language ID Error:", error);
+    return null;
+  }
+};
+
+export const generateAudioFromScript = async (text: string): Promise<string | null> => {
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash-preview-tts",
+      contents: {
+        parts: [{ text }],
+      },
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: 'Kore' }, // Calm, middle-aged female voice
+          },
+        },
+      },
+    });
+
+    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!base64Audio) return null;
+    
+    return base64Audio;
+  } catch (error) {
+    console.error("TTS Error:", error);
+    return null;
   }
 };

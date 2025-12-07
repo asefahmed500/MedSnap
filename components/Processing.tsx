@@ -1,34 +1,37 @@
 import React from 'react';
-import { Loader2, Sparkles } from 'lucide-react';
+import { Brain, Heart } from 'lucide-react';
 
 const Processing: React.FC = () => {
   return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 animate-in fade-in duration-700">
-      <div className="relative mb-8">
-        <div className="absolute inset-0 bg-blue-500 blur-xl opacity-20 animate-pulse rounded-full"></div>
-        <div className="bg-white p-4 rounded-2xl shadow-lg border border-slate-100 relative">
-          <Loader2 className="w-12 h-12 text-blue-600 animate-spin" />
-        </div>
-        <div className="absolute -top-2 -right-2 bg-yellow-400 p-1.5 rounded-full text-white shadow-sm animate-bounce">
-          <Sparkles size={16} fill="currentColor" />
-        </div>
-      </div>
+    <div className="h-full flex flex-col items-center justify-center bg-gradient-to-br from-[#E8F5E9] to-[#E3F2FD] p-8">
       
-      <h2 className="text-2xl font-bold text-slate-900 mb-2">Analyzing Document...</h2>
-      <p className="text-slate-500 max-w-xs mx-auto mb-8">
-        MedSnap is identifying medications, translating instructions, and checking for safety warnings.
+      <div className="relative w-64 h-64 flex items-center justify-center mb-12">
+        {/* Orbiting Circles */}
+        <div className="absolute inset-0 rounded-full border border-blue-200/50 animate-[spin_4s_linear_infinite]"></div>
+        <div className="absolute inset-4 rounded-full border border-green-200/50 animate-[spin_3s_linear_infinite_reverse]"></div>
+        
+        {/* Central Morphing Container */}
+        <div className="relative w-32 h-32 bg-white rounded-3xl shadow-xl shadow-blue-100 flex items-center justify-center animate-bounce-slow">
+           <div className="absolute inset-0 bg-white rounded-3xl animate-ping opacity-20"></div>
+           
+           {/* Icon Transition */}
+           <div className="relative z-10">
+              <Brain size={48} className="text-[#0066F5] animate-[pulse_2s_ease-in-out_infinite]" />
+           </div>
+        </div>
+
+        {/* Flying Particles */}
+        <div className="absolute top-0 right-10 w-3 h-3 bg-orange-400 rounded-full animate-ping delay-75"></div>
+        <div className="absolute bottom-10 left-10 w-2 h-2 bg-blue-400 rounded-full animate-ping delay-150"></div>
+      </div>
+
+      <h2 className="text-2xl font-bold text-slate-900 mb-3 text-center">
+        Reading your document...
+      </h2>
+      <p className="text-lg text-slate-500 text-center max-w-[250px]">
+        Almost done translating into your language
       </p>
 
-      <div className="space-y-3 w-full max-w-xs">
-        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-          <div className="h-full bg-blue-500 w-2/3 animate-[shimmer_1.5s_infinite] bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.5),transparent)]"></div>
-        </div>
-        <div className="flex justify-between text-xs text-slate-400 font-medium">
-          <span>Scanning text</span>
-          <span>Translating</span>
-          <span>Checking safety</span>
-        </div>
-      </div>
     </div>
   );
 };
