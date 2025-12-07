@@ -95,7 +95,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden flex flex-col">
+    <div className="h-screen bg-navy-900 font-sans text-cream-50 overflow-hidden flex flex-col">
       
       {state.view !== 'history' && state.step !== 'results' && state.step !== 'capture' && (
         <Header 
@@ -124,12 +124,6 @@ const App: React.FC = () => {
           <>
             {/* Logic for Home vs Capture vs Results */}
             {state.step === 'capture' && (
-                // We split "Home" and "Camera" logic here roughly based on user intent
-                // For MVP state machine simplicity: 
-                // We show Home first. Home button triggers Camera Overlay.
-                // We will use a local state in App to toggle the Camera Overlay visibility if needed, 
-                // OR just treat 'capture' as the Home screen for now, but pass a prop to trigger camera.
-                // Let's make Home the default 'capture' step view, and it opens CameraCapture component on click.
                 <StatefulHome 
                    userName="Maria" 
                    language={state.selectedLanguage}

@@ -1,4 +1,12 @@
-export type LanguageCode = 'es' | 'zh' | 'tl' | 'vi' | 'ar' | 'fr' | 'ko' | 'ru' | 'ht' | 'pt' | 'hi' | 'ur' | 'bn' | 'fa' | 'so' | 'ne' | 'uk' | 'sw' | 'am' | 'my';
+
+export type LanguageCode = 
+  | 'es' | 'zh' | 'tl' | 'vi' | 'ar' | 'fr' | 'ko' | 'ru' | 'ht' | 'pt' 
+  | 'hi' | 'ur' | 'bn' | 'fa' | 'so' | 'ne' | 'uk' | 'sw' | 'am' | 'my'
+  | 'ja' | 'de' | 'it' | 'tr' | 'pl' | 'nl' | 'el' | 'th' | 'id' | 'ms'
+  | 'pa' | 'gu' | 'ta' | 'te' | 'ml' | 'kn' | 'mr' | 'ro' | 'hu' | 'cs'
+  | 'sv' | 'da' | 'fi' | 'no' | 'he' | 'bg' | 'hr' | 'sr' | 'sk' | 'sl'
+  | 'hy' | 'km' | 'hmn' | 'lo' | 'bs' | 'sq' | 'ka' | 'az'
+  | 'mn' | 'kk' | 'uz' | 'ps' | 'ku';
 
 export interface Language {
   code: LanguageCode;
@@ -11,11 +19,19 @@ export interface HighlightRegion {
   label: string;
   type: 'critical' | 'medication' | 'date' | 'normal';
   description?: string;
+  importanceExplanation?: string; // Brief explanation in target language
 }
 
 export interface QuizQuestion {
   question: string;
   answer: boolean; // true for Yes, false for No
+  explanation: string;
+}
+
+export interface Ambiguity {
+  original: string;
+  translated: string;
+  alternative: string;
   explanation: string;
 }
 
@@ -26,6 +42,7 @@ export interface AnalysisResult {
   summary: string; // For audio
   isEmergency: boolean;
   emergencyMessage?: string;
+  ambiguities?: Ambiguity[];
   highlights: HighlightRegion[];
   quiz: QuizQuestion[];
   timestamp?: number;

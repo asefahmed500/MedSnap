@@ -1,9 +1,9 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
 import { AnalysisResult } from '../types';
-import { Play, Pause, AlertTriangle, CheckCircle, FileDown, X, FastForward, Rewind, Share2, Loader2 } from 'lucide-react';
-import ImageViewer from './ImageViewer';
+import { AlertTriangle, ChevronRight, ChevronLeft, Home } from 'lucide-react';
+import ResultsImagePage from './results/ResultsImagePage';
+import ResultsTranslationPage from './results/ResultsTranslationPage';
+import ResultsSummaryPage from './results/ResultsSummaryPage';
 import QuizModal from './QuizModal';
 import { generatePDF, generatePDFBlob } from '../services/pdfService';
 import { generateAudioFromScript } from '../services/geminiService';
@@ -15,310 +15,248 @@ interface ResultsViewProps {
 }
 
 const ResultsView: React.FC<ResultsViewProps> = ({ result, imageSrc, onRetake }) => {
-  const [showAudioSheet, setShowAudioSheet] = useState(false);
+  // Wizard Step State: 0=Image, 1=Text, 2=Action
+  const [page, setPage] = useState(0); 
+  
+  // Audio State management
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
-  const [showQuiz, setShowQuiz] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [showQuiz, setShowQuiz] = useState(false);
 
-  // Clean up audio on unmount
+  // --- AUDIO LIFECYCLE MANAGEMENT ---
   useEffect(() => {
+    // Cleanup audio when component unmounts
     return () => {
-        if (audioRef.current) {
-            audioRef.current.pause();
-        }
-        window.speechSynthesis.cancel();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = "";
+      }
+      window.speechSynthesis.cancel();
     };
   }, []);
-  
+
+  const setupAudioListeners = (audio: HTMLAudioElement) => {
+    audio.ontimeupdate = () => setCurrentTime(audio.currentTime);
+    audio.onloadedmetadata = () => {
+        if (audio.duration && !isNaN(audio.duration)) {
+            setDuration(audio.duration);
+        }
+    };
+    audio.onended = () => {
+        setIsPlaying(false);
+        setCurrentTime(0);
+    };
+    audio.onplay = () => setIsPlaying(true);
+    audio.onpause = () => setIsPlaying(false);
+  };
+
+  // Fallback to browser's built-in speech synthesis
   const fallbackToSynthesis = () => {
-      console.log("Falling back to SpeechSynthesis");
-      const u = new SpeechSynthesisUtterance(result.summary);
-      u.onend = () => setIsPlaying(false);
-      window.speechSynthesis.speak(u);
-      setIsPlaying(true);
-      setIsLoadingAudio(false);
+    console.log("Falling back to Browser TTS");
+    if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+    }
+    const u = new SpeechSynthesisUtterance(result.summary);
+    u.onend = () => setIsPlaying(false);
+    u.onstart = () => setIsPlaying(true);
+    window.speechSynthesis.speak(u);
+    setIsLoadingAudio(false);
   };
 
   const toggleAudio = async () => {
-    if (!showAudioSheet) setShowAudioSheet(true);
-    
-    // Pause if playing
+    // 1. Pause Logic
     if (isPlaying) {
-        if (audioRef.current && !audioRef.current.paused) {
-            audioRef.current.pause();
-        }
-        if (window.speechSynthesis.speaking) {
-            window.speechSynthesis.cancel();
-        }
-        setIsPlaying(false);
-        return;
-    }
-    
-    // Resume existing HTML Audio
-    if (audioRef.current) {
-        audioRef.current.play()
-            .then(() => setIsPlaying(true))
-            .catch(() => fallbackToSynthesis()); // Fallback if playback fails
-        return;
-    }
-
-    // New Playback Request
-    setIsLoadingAudio(true);
-    try {
-        const audioData = await generateAudioFromScript(result.summary);
-        
-        if (audioData) {
-             // Try to play with HTML5 Audio
-             const src = `data:audio/wav;base64,${audioData}`;
-             const audio = new Audio(src);
-             
-             audio.oncanplaythrough = () => {
-                 audio.play();
-                 setIsPlaying(true);
-                 setIsLoadingAudio(false);
-                 audioRef.current = audio;
-             };
-             
-             audio.onended = () => setIsPlaying(false);
-             
-             audio.onerror = (e) => {
-                 console.warn("HTML5 Audio playback failed (format likely unsupported), using fallback.", e);
-                 fallbackToSynthesis();
-             };
-
-             // Load the src to trigger events
-             audio.load();
-        } else {
-             fallbackToSynthesis();
-        }
-    } catch (e) {
-        console.error("Audio generation error", e);
-        fallbackToSynthesis();
-    }
-  };
-
-  const handleShare = async () => {
-    if (!navigator.share) {
-      alert("Sharing is not supported on this device/browser.");
+      if (audioRef.current && !audioRef.current.paused) audioRef.current.pause();
+      if (window.speechSynthesis.speaking) window.speechSynthesis.cancel();
+      setIsPlaying(false);
       return;
     }
 
+    // 2. Resume Logic (if audio already loaded)
+    if (audioRef.current) {
+      audioRef.current.play()
+        .catch(() => fallbackToSynthesis());
+      return;
+    }
+
+    // 3. New Audio Generation Logic
+    setIsLoadingAudio(true);
     try {
-      // Strategy 1: Try sharing PDF (The "Translated Document")
-      const pdfBlob = generatePDFBlob(result, imageSrc);
-      const pdfFile = new File([pdfBlob], `MedSnap_${result.title.replace(/\s+/g, '_')}.pdf`, { type: 'application/pdf' });
-
-      const pdfShareData = {
-        title: `MedSnap: ${result.title}`,
-        text: `Translation for: ${result.title}\n\n${result.summary}\n\n-- Translated via MedSnap`,
-        files: [pdfFile],
-      };
-
-      if (navigator.canShare && navigator.canShare(pdfShareData)) {
-        await navigator.share(pdfShareData);
-        return;
+      const audioData = await generateAudioFromScript(result.summary);
+      if (audioData) {
+        // Assume format compatible with browser (wav/mp3)
+        const src = `data:audio/mp3;base64,${audioData}`;
+        const audio = new Audio(src);
+        setupAudioListeners(audio);
+        
+        audio.oncanplaythrough = () => {
+          audio.play();
+          setIsLoadingAudio(false);
+          audioRef.current = audio;
+        };
+        
+        audio.onerror = (e) => {
+            console.warn("HTML5 Audio Error, trying fallback", e);
+            fallbackToSynthesis();
+        };
+        audio.load();
+      } else {
+        fallbackToSynthesis();
       }
-      
-      // Strategy 2: Fallback to Image + Text
-      console.log("PDF sharing not supported, trying image...");
-      const imgRes = await fetch(imageSrc);
-      const imgBlob = await imgRes.blob();
-      const imgFile = new File([imgBlob], "original_doc.jpg", { type: imgBlob.type });
-      
-      const imgShareData = {
-          title: `MedSnap: ${result.title}`,
-          text: `Translation for: ${result.title}\n\n${result.summary}\n\n-- Translated via MedSnap`,
-          files: [imgFile]
-      };
-      
-      if (navigator.canShare && navigator.canShare(imgShareData)) {
-          await navigator.share(imgShareData);
-          return;
-      }
-
-      // Strategy 3: Text Only Fallback
-      console.log("File sharing not supported, sharing text only...");
-      await navigator.share({
-         title: `MedSnap: ${result.title}`,
-         text: `Translation for: ${result.title}\n\n${result.summary}\n\n-- Translated via MedSnap`,
-         url: window.location.href 
-      });
-
-    } catch (error) {
-      console.error("Error sharing:", error);
+    } catch (e) {
+      console.error("Audio Fetch Error", e);
+      fallbackToSynthesis();
     }
   };
 
+  const handleSeek = (time: number) => {
+    if (audioRef.current) {
+        audioRef.current.currentTime = time;
+        setCurrentTime(time);
+    }
+  };
+
+  // --- SHARE FUNCTIONALITY ---
+  const handleShare = async () => {
+    // Generate safe filename
+    const safeTitle = (result.title || 'document').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const fileName = `MedSnap_${safeTitle}.pdf`;
+
+    if (navigator.share && navigator.canShare) {
+        try {
+            const pdfBlob = generatePDFBlob(result, imageSrc);
+            const file = new File([pdfBlob], fileName, { type: "application/pdf" });
+            const data = { 
+                title: result.title, 
+                text: `${result.title}\n\n${result.summary}`, 
+                files: [file] 
+            };
+            
+            if (navigator.canShare(data)) {
+                await navigator.share(data);
+                return;
+            }
+        } catch (e) {
+            console.warn("Native file share failed", e);
+        }
+    }
+
+    // Fallback to text sharing
+    if (navigator.share) {
+        await navigator.share({ 
+            title: result.title, 
+            text: `${result.title}\n\n${result.summary}`, 
+            url: window.location.href 
+        });
+    } else {
+        // Last resort: Download PDF
+        if (confirm("Sharing not supported. Download PDF instead?")) {
+            generatePDF(result, imageSrc);
+        }
+    }
+  };
+
+  // --- RENDER ---
   return (
-    <div className="h-full flex flex-col bg-slate-50 relative">
+    <div className="h-full flex flex-col bg-navy-900 text-cream-50 relative font-sans overflow-hidden">
       
-      {/* Emergency Floating Banner */}
+      {/* 1. Global Emergency Banner */}
       {result.isEmergency && (
-        <div className="absolute top-6 left-4 right-4 bg-[#D32F2F] text-white p-4 rounded-2xl shadow-xl shadow-red-200 z-50 flex items-center justify-between animate-in slide-in-from-top duration-500">
+        <div className="shrink-0 bg-red-600 text-white p-4 z-[60] flex items-center justify-between shadow-2xl animate-fade-in-up">
            <div className="flex items-center gap-3">
-             <div className="bg-white/20 p-2 rounded-full">
-               <AlertTriangle fill="currentColor" size={20} />
+             <div className="bg-white/20 p-2 rounded-full animate-pulse">
+               <AlertTriangle size={24} fill="white" />
              </div>
              <div>
                <p className="font-bold text-lg leading-tight">Emergency Detected</p>
-               <p className="text-white/90 text-sm">Seek care immediately</p>
+               <p className="text-white/80 text-xs">Based on document analysis</p>
              </div>
            </div>
-           <button className="bg-white text-[#D32F2F] px-4 py-2 rounded-xl font-bold text-sm">
+           <a href="tel:911" className="bg-white text-red-600 px-5 py-2.5 rounded-lg font-bold text-sm hover:bg-red-50 transition-colors shadow-sm">
              Call 911
-           </button>
+           </a>
         </div>
       )}
 
-      {/* Split View Container */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
-        
-        {/* Top Half: Original Image (45%) */}
-        <div className="h-[45%] bg-slate-900 relative">
-           <ImageViewer imageSrc={imageSrc} highlights={result.highlights} showHighlights={true} />
-           
-           {/* Overlay Legend Badge */}
-           <div className="absolute bottom-4 left-4 right-4 flex justify-center">
-             <div className="bg-black/60 backdrop-blur-md text-white text-xs px-3 py-1.5 rounded-full flex gap-3">
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#D32F2F]"></span>Warning</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#F57C00]"></span>Meds</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#FBC02D]"></span>Date</span>
-             </div>
-           </div>
-        </div>
-
-        {/* Bottom Half: Translation (55%) */}
-        <div className="h-[55%] bg-white rounded-t-3xl -mt-6 z-10 shadow-[0_-4px_20px_rgba(0,0,0,0.1)] flex flex-col relative overflow-hidden">
-           
-           {/* Drag Handle */}
-           <div className="w-full flex justify-center pt-3 pb-1">
-             <div className="w-12 h-1.5 bg-slate-200 rounded-full"></div>
-           </div>
-
-           {/* Content */}
-           <div className="flex-1 overflow-y-auto px-6 pb-32 pt-2 custom-scrollbar">
-              <div className="flex items-center justify-between mb-4">
-                 <span className="px-3 py-1 bg-blue-50 text-[#0066F5] text-xs font-bold uppercase tracking-wider rounded-lg">
-                    {(result.documentType || 'DOCUMENT').replace('_', ' ')}
-                 </span>
-                 <span className="text-slate-400 text-sm">Today, {new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-              </div>
-              
-              <h1 className="text-2xl font-bold text-slate-900 mb-4 leading-tight">{result.title}</h1>
-              
-              <div className="prose prose-lg prose-slate max-w-none prose-p:text-slate-600 prose-headings:text-slate-900 prose-li:text-slate-600">
-                <ReactMarkdown>{result.translatedContent}</ReactMarkdown>
-              </div>
-           </div>
-
-           {/* Bottom Fixed Action Bar (Frosted) */}
-           <div className="absolute bottom-0 left-0 right-0 p-4 pb-8 bg-white/80 backdrop-blur-xl border-t border-slate-100 flex items-center gap-3 z-20">
-              
-              <button 
-                onClick={toggleAudio}
-                disabled={isLoadingAudio}
-                className="flex-[2] bg-[#0066F5] text-white h-14 rounded-2xl font-bold text-lg shadow-lg shadow-blue-200 flex items-center justify-center gap-2 hover:bg-blue-600 transition-colors disabled:opacity-70"
-              >
-                {isLoadingAudio ? <Loader2 className="animate-spin" /> : <Play fill="currentColor" size={20} />}
-                {isLoadingAudio ? "Loading..." : "Listen"}
-              </button>
-
-              <button 
-                 onClick={() => setShowQuiz(true)}
-                 className="h-14 w-14 bg-green-50 text-[#388E3C] rounded-2xl border border-green-100 flex items-center justify-center hover:bg-green-100 transition-colors shrink-0"
-                 title="Verify Understanding"
-              >
-                 <CheckCircle size={28} />
-              </button>
-
-              <button 
-                 onClick={handleShare}
-                 className="h-14 w-14 bg-slate-50 text-slate-600 rounded-2xl border border-slate-100 flex items-center justify-center hover:bg-slate-100 transition-colors shrink-0"
-                 title="Share PDF or Image"
-              >
-                 <Share2 size={24} />
-              </button>
-
-              <button 
-                 onClick={() => generatePDF(result, imageSrc)}
-                 className="h-14 w-14 bg-slate-50 text-slate-600 rounded-2xl border border-slate-100 flex items-center justify-center hover:bg-slate-100 transition-colors shrink-0"
-                 title="Download PDF"
-              >
-                 <FileDown size={24} />
-              </button>
-           </div>
-        </div>
+      {/* 2. Wizard Stepper Navigation */}
+      <div className="bg-navy-950 pt-6 pb-4 px-6 shrink-0 border-b border-white/5 z-20 relative">
+         <div className="flex items-center justify-between max-w-md mx-auto">
+            {[0, 1, 2].map((step) => {
+                const isActive = step === page;
+                const isCompleted = step < page;
+                return (
+                    <div key={step} className="flex flex-col items-center gap-2 relative z-10">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300
+                            ${isActive ? 'bg-gold-400 text-navy-900 scale-110 shadow-[0_0_15px_rgba(212,175,55,0.4)]' : 
+                              isCompleted ? 'bg-navy-700 text-gold-400 border border-gold-400/50' : 'bg-navy-800 text-cream-200/30 border border-white/5'}
+                        `}>
+                            {step + 1}
+                        </div>
+                        <span className={`text-[10px] font-bold uppercase tracking-widest transition-colors ${isActive ? 'text-gold-400' : 'text-cream-200/20'}`}>
+                            {step === 0 ? 'Scan' : step === 1 ? 'Read' : 'Act'}
+                        </span>
+                    </div>
+                );
+            })}
+            {/* Connecting Line */}
+            <div className="absolute top-[40px] left-10 right-10 h-0.5 bg-navy-800 -z-0">
+               <div className="h-full bg-gold-400/50 transition-all duration-500" style={{ width: `${page * 50}%` }}></div>
+            </div>
+         </div>
       </div>
 
-      {/* Screen 7: Audio Playing Overlay (Bottom Sheet) */}
-      {showAudioSheet && (
-        <>
-          <div className="absolute inset-0 bg-black/40 z-40 backdrop-blur-sm" onClick={() => setShowAudioSheet(false)}></div>
-          <div className="absolute bottom-0 left-0 right-0 h-[85%] bg-white rounded-t-[2.5rem] z-50 flex flex-col shadow-2xl animate-in slide-in-from-bottom duration-500">
-             
-             {/* Header */}
-             <div className="p-6 flex items-center justify-between border-b border-slate-50">
-               <div className="flex flex-col">
-                 <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Playing Summary</span>
-                 <span className="text-lg font-bold text-slate-900 truncate max-w-[200px]">{result.title}</span>
-               </div>
-               <button onClick={() => setShowAudioSheet(false)} className="p-2 bg-slate-100 rounded-full text-slate-500">
-                 <X size={20} />
-               </button>
-             </div>
+      {/* 3. Page Content Area */}
+      <div className="flex-1 overflow-hidden relative w-full">
+         <div className="absolute inset-0 w-full h-full">
+            {page === 0 && <ResultsImagePage imageSrc={imageSrc} result={result} />}
+            {page === 1 && <ResultsTranslationPage result={result} />}
+            {page === 2 && (
+              <ResultsSummaryPage 
+                result={result} 
+                isPlaying={isPlaying} 
+                isLoadingAudio={isLoadingAudio} 
+                currentTime={currentTime}
+                duration={duration}
+                onToggleAudio={toggleAudio}
+                onSeek={handleSeek}
+                onQuiz={() => setShowQuiz(true)}
+                onPDF={() => generatePDF(result, imageSrc)}
+                onShare={handleShare}
+              />
+            )}
+         </div>
+      </div>
 
-             {/* Karaoke Text Area (Simulation) */}
-             <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-6 text-center">
-                <p className="text-xl leading-relaxed text-slate-300 transition-colors duration-500">
-                   {result.summary}
-                </p>
-             </div>
+      {/* 4. Bottom Navigation Footer */}
+      <div className="p-5 bg-navy-950 border-t border-white/5 flex items-center justify-between shrink-0 z-30 shadow-[0_-5px_20px_rgba(0,0,0,0.2)]">
+         <button 
+           onClick={page === 0 ? onRetake : () => setPage(p => p - 1)}
+           className="flex items-center gap-2 px-5 py-3 rounded-xl hover:bg-white/5 text-cream-200/60 font-medium transition-colors"
+         >
+           {page === 0 ? <Home size={20} /> : <ChevronLeft size={20} />}
+           {page === 0 ? "Home" : "Back"}
+         </button>
 
-             {/* Controls Area */}
-             <div className="p-8 pb-12 bg-slate-50 rounded-t-[2.5rem]">
-                {/* Waveform Viz */}
-                <div className="flex items-center justify-center gap-1 h-12 mb-8">
-                   {[...Array(20)].map((_, i) => (
-                      <div 
-                        key={i} 
-                        className="w-1.5 bg-[#0066F5] rounded-full animate-wave-bar"
-                        style={{ 
-                          height: `${Math.random() * 100}%`,
-                          animationDelay: `${i * 0.05}s`,
-                          opacity: isPlaying ? 1 : 0.3
-                        }}
-                      ></div>
-                   ))}
-                </div>
+         <button 
+            onClick={() => {
+              if (page < 2) setPage(p => p + 1);
+            }}
+            disabled={page === 2}
+            className={`flex items-center gap-2 px-8 py-3.5 rounded-full font-bold text-navy-900 transition-all shadow-lg 
+                ${page === 2 
+                    ? 'bg-navy-800 text-cream-200/10 cursor-default opacity-0 pointer-events-none' 
+                    : 'bg-gold-400 hover:bg-gold-500 hover:scale-105 active:scale-95 shadow-gold-500/20'}`}
+         >
+            Next Step <ChevronRight size={20} />
+         </button>
+      </div>
 
-                <div className="flex items-center justify-between px-4">
-                   <button className="text-slate-400 hover:text-slate-600"><Rewind size={28} /></button>
-                   
-                   <button 
-                     onClick={() => setIsPlaying(!isPlaying)}
-                     className="w-20 h-20 bg-[#0066F5] text-white rounded-full shadow-xl shadow-blue-200 flex items-center justify-center hover:scale-105 active:scale-95 transition-all"
-                   >
-                     {isPlaying ? <Pause fill="currentColor" size={32} /> : <Play fill="currentColor" size={32} className="ml-1" />}
-                   </button>
-                   
-                   <button className="text-slate-400 hover:text-slate-600"><FastForward size={28} /></button>
-                </div>
-
-                <div className="flex justify-center mt-8 gap-8">
-                   <button className="text-sm font-bold text-slate-500 bg-white px-4 py-2 rounded-full shadow-sm">1.0x Speed</button>
-                </div>
-             </div>
-          </div>
-        </>
-      )}
-
-      {showQuiz && (
-        <QuizModal 
-          questions={result.quiz} 
-          onClose={() => setShowQuiz(false)} 
-        />
-      )}
+      {showQuiz && <QuizModal questions={result.quiz} onClose={() => setShowQuiz(false)} />}
     </div>
   );
 };

@@ -62,3 +62,7 @@ export const deleteModel = (code: LanguageCode): void => {
   const updated = current.filter(c => c !== code);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
 };
+
+export const clearAllModels = (): void => {
+  localStorage.removeItem(STORAGE_KEY);
+};

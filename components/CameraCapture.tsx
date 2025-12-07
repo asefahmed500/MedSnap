@@ -1,6 +1,6 @@
 
 import React, { useRef, useState, useEffect } from 'react';
-import { X, Zap, Upload, Image as ImageIcon, Camera, RefreshCw } from 'lucide-react';
+import { X, Zap, ZapOff, Upload, Image as ImageIcon, Camera, SwitchCamera } from 'lucide-react';
 import { Language } from '../types';
 
 interface CameraCaptureProps {
@@ -19,12 +19,22 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, onCancel, sele
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  
+  // Camera Settings
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
+  const [isTorchOn, setIsTorchOn] = useState(false);
+  const [supportsTorch, setSupportsTorch] = useState(false);
 
   // Initialize Camera
   useEffect(() => {
     let mounted = true;
 
     const startCamera = async () => {
+      // Stop any existing stream tracks
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+
       // Check if browser supports mediaDevices
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         if (mounted) {
@@ -36,12 +46,26 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, onCancel, sele
 
       try {
         const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-          video: { facingMode: 'environment' } 
+          video: { 
+            facingMode: facingMode,
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          } 
         });
         
+        // Check for Torch Capability
+        const track = mediaStream.getVideoTracks()[0];
+        const capabilities = (track.getCapabilities && track.getCapabilities()) || {};
+        if ('torch' in capabilities) {
+          setSupportsTorch(true);
+        } else {
+          setSupportsTorch(false);
+        }
+
         if (mounted) {
           setStream(mediaStream);
           setHasCamera(true);
+          setIsTorchOn(false); // Reset torch state on stream change
           if (videoRef.current) {
             videoRef.current.srcObject = mediaStream;
           }
@@ -63,7 +87,29 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, onCancel, sele
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, []);
+  }, [facingMode]);
+
+  // Toggle Torch/Flash
+  const toggleTorch = async () => {
+    if (!stream) return;
+    const track = stream.getVideoTracks()[0];
+    
+    try {
+      const newStatus = !isTorchOn;
+      // Note: Advanced constraints require casting or ignore in stricter TS setups
+      await track.applyConstraints({
+        advanced: [{ torch: newStatus } as any]
+      });
+      setIsTorchOn(newStatus);
+    } catch (e) {
+      console.error("Failed to toggle torch", e);
+      // Fallback: Just toggle UI state if API fails
+    }
+  };
+
+  const toggleCamera = () => {
+    setFacingMode(prev => prev === 'environment' ? 'user' : 'environment');
+  };
 
   // Handle Capture Logic
   const capturePhoto = () => {
@@ -77,6 +123,12 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, onCancel, sele
       
       const ctx = canvas.getContext('2d');
       if (ctx) {
+        // If front camera, mirror the image horizontally for natural feel
+        if (facingMode === 'user') {
+          ctx.translate(canvas.width, 0);
+          ctx.scale(-1, 1);
+        }
+
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         
         canvas.toBlob((blob) => {
@@ -163,8 +215,12 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, onCancel, sele
         <div className="bg-black/40 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/10 flex items-center gap-2">
             <span className="text-sm font-medium">{selectedLanguage.nativeName}</span>
         </div>
-        <button className="p-2 bg-white/10 backdrop-blur-md rounded-full hover:bg-white/20 transition">
-            <Zap size={24} />
+        <button 
+          onClick={toggleTorch}
+          disabled={!supportsTorch || !hasCamera}
+          className={`p-2 backdrop-blur-md rounded-full transition ${isTorchOn ? 'bg-yellow-400 text-black' : 'bg-white/10 text-white hover:bg-white/20'} ${(!supportsTorch || !hasCamera) ? 'opacity-30 cursor-not-allowed' : ''}`}
+        >
+            {isTorchOn ? <Zap size={24} fill="currentColor" /> : <ZapOff size={24} />}
         </button>
       </div>
 
@@ -177,7 +233,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, onCancel, sele
             ref={videoRef}
             autoPlay 
             playsInline 
-            className="absolute inset-0 w-full h-full object-cover"
+            className={`absolute inset-0 w-full h-full object-cover transition-transform duration-500 ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-white/50 bg-slate-900">
@@ -229,12 +285,12 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, onCancel, sele
       <div className="bg-black/80 backdrop-blur-xl p-8 pb-12 rounded-t-[2.5rem] flex justify-between items-center z-20 border-t border-white/10">
          <button 
            onClick={handleUploadClick}
-           className="flex flex-col items-center gap-1 text-white hover:text-blue-200 transition-colors group"
+           className="flex flex-col items-center gap-1 text-white hover:text-blue-200 transition-colors group w-16"
          >
            <div className="p-4 rounded-2xl bg-white/10 group-hover:bg-white/20 transition border border-white/10">
              <ImageIcon size={24} />
            </div>
-           <span className="text-[10px] font-bold uppercase tracking-wide mt-1">Upload File</span>
+           <span className="text-[10px] font-bold uppercase tracking-wide mt-1">Upload</span>
          </button>
 
          {/* Shutter Button - Handles Camera or File Input */}
@@ -251,13 +307,14 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, onCancel, sele
          </button>
 
          <button 
-           onClick={() => hasCamera ? setHasCamera(false) : window.location.reload()} // Simple reload to re-init camera or reset state
-           className="flex flex-col items-center gap-1 text-white/70 hover:text-white transition-colors group"
+           onClick={toggleCamera}
+           disabled={!hasCamera}
+           className={`flex flex-col items-center gap-1 text-white/70 hover:text-white transition-colors group w-16 ${!hasCamera ? 'opacity-30' : ''}`}
          >
            <div className="p-4 rounded-2xl bg-white/5 group-hover:bg-white/10 transition">
-             <RefreshCw size={24} />
+             <SwitchCamera size={24} />
            </div>
-           <span className="text-[10px] font-bold uppercase tracking-wide mt-1">Reset</span>
+           <span className="text-[10px] font-bold uppercase tracking-wide mt-1">Flip</span>
          </button>
       </div>
 

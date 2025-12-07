@@ -18,7 +18,8 @@ const MOCK_OFFLINE_RESULT: AnalysisResult = {
         box_2d: [100, 100, 300, 900],
         label: "Document Content",
         type: "normal",
-        description: "Text region detected"
+        description: "Text region detected",
+        importanceExplanation: "Offline detection region."
     }
   ],
   quiz: [
@@ -57,7 +58,7 @@ export const analyzeDocument = async (
     const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
 
     const prompt = `
-      You are a certified medical translator and pharmacist. 
+      You are MedSnap, a certified medical translator and pharmacist. 
       Analyze the provided medical document image (prescription, lab result, discharge summary).
       
       Source Language: English (assumed, unless clearly otherwise).
@@ -81,23 +82,33 @@ export const analyzeDocument = async (
       2. **Medical Translation**: 
          Translate the full content into ${targetLanguage.name}.
          - **Style**: Formal but simple tone suitable for low-literacy patients.
-         - **Accuracy**: Preserve all numbers, dates, and drug names EXACTLY. Do not translate the names of medications (e.g. "Amoxicillin" remains "Amoxicillin").
+         - **Accuracy**: Preserve all numbers, dates, and drug names EXACTLY. 
+         - **Do NOT Translate**: Patient names, doctor names, facility names, or medication names (e.g. "Amoxicillin" remains "Amoxicillin").
          - **Structure**: Maintain original layout structure in Markdown as much as possible.
 
-      3. **Audio Script**: 
+      3. **Ambiguity Check**:
+         Identify up to 3 terms that might be ambiguous, culturally specific, or have multiple meanings in the target language.
+         Provide the chosen translation, an alternative, and a brief explanation to help the patient avoid confusion.
+
+      4. **Audio Script**: 
          Create a natural spoken explanation in ${targetLanguage.name}.
          - Structure: Short, clear sentences.
          - Example style: "This is a prescription for [Drug]. You must take [Amount] [Frequency] with food..."
 
-      4. **Visual Highlights**: 
+      5. **Visual Highlights**: 
          Identify regions to highlight on the image:
          - **CRITICAL** (Red): The specific emergency warnings found in step 1, plus allergies/contraindications.
          - **MEDICATION** (Orange): Drug names, dosages, frequencies.
          - **DATE** (Yellow): Dates, times, durations.
          - **NORMAL** (Green): Normal lab results, standard headers.
+         
+         For each highlight, provide an 'importanceExplanation' in ${targetLanguage.name}.
+         This should be a very short sentence (5-10 words) explaining simply WHY this info matters.
 
-      5. **Verification**: 
-         Create 3 simple Yes/No questions in ${targetLanguage.name} to verify the patient understands the key instructions.
+      6. **Verification (Quiz)**: 
+         Create 2-3 simple Yes/No questions in ${targetLanguage.name} to verify the patient understands the key instructions.
+         - **Simple**: Ensure language is very basic.
+         - **Helpful**: If they answer wrong, the 'explanation' should gently correct them (e.g., "Actually, you should take it with food to avoid stomach pain.").
 
       Return the response in strictly valid JSON format matching the schema provided.
       For highlights, provide bounding boxes [ymin, xmin, ymax, xmax] on a scale of 0 to 1000.
@@ -132,6 +143,19 @@ export const analyzeDocument = async (
             summary: { type: Type.STRING, description: "Natural audio script in target language" },
             isEmergency: { type: Type.BOOLEAN, description: "True if life-threatening instructions are found" },
             emergencyMessage: { type: Type.STRING, description: "Translated urgent banner text (e.g. '¡EMERGENCIA! ...')" },
+            ambiguities: {
+              type: Type.ARRAY,
+              description: "List of ambiguous terms clarified",
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  original: { type: Type.STRING },
+                  translated: { type: Type.STRING },
+                  alternative: { type: Type.STRING },
+                  explanation: { type: Type.STRING }
+                }
+              }
+            },
             highlights: {
               type: Type.ARRAY,
               items: {
@@ -144,7 +168,8 @@ export const analyzeDocument = async (
                   },
                   label: { type: Type.STRING },
                   type: { type: Type.STRING, enum: ["critical", "medication", "date", "normal"] },
-                  description: { type: Type.STRING }
+                  description: { type: Type.STRING },
+                  importanceExplanation: { type: Type.STRING, description: "Simple explanation of importance in target language" }
                 }
               }
             },
@@ -191,10 +216,6 @@ export const analyzeDocument = async (
 export const identifyLanguageFromAudio = async (base64Audio: string): Promise<Language | null> => {
   try {
     const cleanBase64 = base64Audio.replace(/^data:audio\/(webm|mp3|wav|ogg|mpeg);base64,/, "");
-    
-    // We assume the browser records in webm, but Gemini handles detection well.
-    // The mimeType passed to inlineData should match the data.
-    // If it's a raw blob from MediaRecorder in Chrome, it's usually audio/webm.
     
     const prompt = `
       User just spoke their preferred language.
